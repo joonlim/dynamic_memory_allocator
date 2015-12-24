@@ -1,0 +1,198 @@
+					Task: Create a custom dynamic memory allocator rather than using the one provided by glibc
+					* CANNOT USE:
+						- malloc()
+						- calloc()
+						- realloc()
+						- free()
+						- memalign()
+						- valloc()
+						- mmap()
+						- munmap()
+					* Makefile and program with main() not graded
+
+
+					- Program works without preprocessor directives
+
+					- EXPLICIT FREELIST
+						- doubly linked free list
+						- only check for FREE spots using pointers, located right after header. 
+							- these are called 'pred' and 'succ'
+							- pred is a pointer that comes right after header
+							- succ is a pointer that comes right after successor
+							- these do not exist in allocated blocks. They are only in free blocks over the old payload.
+						- we do not need an extra word for the pointer, bc they are only in FREE regions.
+
+
+					- Managing the freelist
+						- error if both -DLIFO & -DADDRESS in compilation
+						- #define LIFO or default
+							- implements management of information in last-in-first-out manner.
+							- 
+
+						- #define ADDRESS
+							- implements management of information in increasing address order
+
+					- Placement Policy
+						- error if both -DFIRST & -DNEXT in compilation
+						- #define FIRST or default
+							- implements First placement strategy
+								- start at beginning of heap(or first free block) and check in order until we find a big enough space
+
+						- #define NEXT
+							- implements Next placement strategy
+								- keep track of where previous search finished. then check in order until we find a big enough space.
+
+						 - allocated regions do NOT have links to next/prev
+
+					- When allocating, split blocks which are too large strategically
+						- once the allocator has located a free block that fits, it makes a decision about how much of the free block to allocate.
+						- split into two parts.
+							first part becomes the allocated block
+												remainder becomes a new free block
+
+					- when freeing, use IMMEDIATE COALESCING when freeing (as opposed to deferred)
+						- use boundary tags(footers) to assist (64-bit (8 Bytes)) Same format as header
+						- current block = block we want to free
+							if next block is free,
+								add its size to curren block. mark our header and NEW footer
+							if previous block is free (check header)
+								add current block's size to its header and footer
+
+										- each block(single unit) is 64-bits (8 Bytes)
+
+					- largest type is "long double" at 16 Bytes. Take this into consideration when determining the alignment and padding for payloads.
+
+					- Headers are 64-bit (8 Bytes)
+						|=================================|==============================|00a|	- 64 bit
+								32-bit Requested Size 				29-bit Block size  	  	allocated bit
+
+						- 32-bit Requested Size: the number of bytes requested from malloc, calloc, or realloc
+						- 29-bit Block Size: the size of the entire block
+						- 3-bit allocated bit: the last bit a in (00a) is the allocated bit
+							a = 1, allocated
+							a = 0, free
+
+
+					- first word in heap is unused padding aligned to a double-word boundary
+
+					- Prologue block - 8 byte allocated. only header and footer after the first padding
+
+					- Epilogue block - 0-size alocated
+						- only a header
+
+					#include <unistd.h>
+					int brk(void *end_data_segment);
+					void *sbrk(intptr_t increment);
+
+					- static ptr heap_listp - private variable(sfmm.c) always points to prologue block
+
+					- brk() - returns int
+						- points to top of heap**************
+						- only calls to brk() of size 4096 B
+
+					- sbrk()
+						- only calls to sbrk of size 4KB 4096 B
+						- use global variable to keep track of sbrk usage to later output total heap size
+
+					- Driver with a main() to test my allocator functions
+
+					- void sf_mem_init()
+						- initializes memory allocator
+						- called before main()
+						- creates prologue
+							- set static ptr heap_listp to prologue
+						- creates epilogue
+
+					- void* sf_malloc(size_t size)
+						- if size == 0, return NULL
+						- if size > 4294967296, return NULL, set ERRNO to ENOMEM
+						- creates dynamic memory in heap which is aligned and padded properly
+						- make sure memory returned is aligned and padded correctly
+						- if there is no space in heap, request space
+						- @param size is the requested allocated space
+						- @return pointer to a valid region of memory, set ERRNO to 0
+						- @return NULL if unsucessful, set ERRNO to ENOMEM
+
+					- void sf_free(void *ptr)
+						- mark the header/footer of a region as a = 0
+						- must coalesce if necessary
+						- @param ptr pointer to to the request region to free (points to the word after header)
+						- if ptr = NULL, return out
+						- if ptr = middle of region, return out
+						- if ptr = area not in heap, return out
+
+					- void* sf_realloc(void *ptr, size_t size)
+						- if size == 0, return NULL
+						- if size > 4294967296, return NULL, set ERRNO to ENOMEM
+						- resizes the allocated memory in ptr by size
+						- make sure memory returned is aligned and padded correctly
+						- @param ptr pointer to to the request region to resize (points to the word after header)
+						- @param size is the new requested allocated space. not a problem if smaller than previous size
+							- if size is greater than the current size + free space to the right and left, we have a problem.
+							- if there is no space in heap, request space
+							- must free this spot and find a new spot
+						- @return pointer to a valid region of memory, set ERRNO to 0
+						- @return NULL if unsucessful, set ERRNO to ENOMEM 
+
+- void* sf_calloc(size_t nmemb, size_t size)
+	- if nmemb == 0 || size == 0, return NULL
+	- if size > 4294967296, return NULL, set ERRNO to ENOMEM
+	- calls sf_malloc with size(size * nmemb)
+	- make sure memory returned is aligned and padded correctly
+
+- void sf_snapshot()
+	- outputs the state of the FREE-LIST to stdout.
+	- used to help debug/visualize free list
+--------------------------------------
+	Explicit Blocksize TotalHeapSize
+
+	# Date-Time
+	MemAddress NumBlocks			# address of the header for the block in HEX, size of region
+	MemAddress NumBlocks
+	MemAddress NumBlocks
+	MemAddress NumBlocks
+	...
+--------------------------------------
+ex:
+	Explicit 8 4096		# mean we only increased the heap one time
+
+	08/23/12 - 12:40AM		# use strftime
+	0xffffe00000095040 8
+	0xffffe0000010a058 16
+	...
+
+
+*****
+
+- try to store structs
+
+- try to malloc space greater than 4 KB
+
+
+MAKE SURE THESE COMBOS WORK
+
+-DLIFO -DFIRST
+-DLIFO -DNEXT
+-DADDRESS -DFIRST
+-DADDRESS -DNEXT
+
+
+
+#ifdef NEXT		// Detects -DNEXT if it exists
+	/* Next placement algorithm */
+#else
+	/* First placement algorithm */
+#endif
+
+
+
+next fit
+- keep track of the next link of where the prev 'free' call stopped.
+- if the nextfit pointed region is coalesced, the next fit ptr becomes the new freed region
+
+
+
+What does snapshot print when there is no free region.
+
+
+snapshot should not print anything upon first call
